@@ -13,7 +13,6 @@
 # [] Cleanup !!!
 # [] Do nice macros?
 
-import print
 # import dbg
 
 # {.push stackTrace:off.}
@@ -53,10 +52,6 @@ template getOffset(aa, bb: untyped): int =
 # template getOffset(aa, bb: untyped): int =
 #   cast[int](bb) - cast[int](aa)
 
-template info(aa, bb: untyped) =
-  print cast[int](aa).toHex()
-  print cast[int](bb).toHex()
-  print getOffset(aa, bb)
 
 template windbg(body: untyped) =
   when not defined release:
@@ -329,8 +324,10 @@ when false:
     return 13.37
 
 
-
-
+  template info(aa, bb: untyped) =
+    print cast[int](aa).toHex()
+    print cast[int](bb).toHex()
+    print getOffset(aa, bb)
 
 
   info(functionA, functionB)
