@@ -1,6 +1,5 @@
 ## A small (and quite naive) amd64 api hooking library
 
-
 ## Wording:
 ##  orginalFunc := The function to hook
 ##  detourFunc := Our function, that replaces `orginalFunc`
@@ -8,12 +7,13 @@
 ##  farJumpHelper := asm code, that is placed nearby the originalFunc in memory, to reach the detourFunc
 
 ## TODO
-# [] Take care of RIP code etc
-#   [] Use capstone?
-# [] Cleanup !!!
-# [] Do nice macros?
+# [ ] Take care of RIP code etc
+#   [ ] Use capstone?
+# [ ] Cleanup !!!
+# [x] Do nice macros?
 
-# import dbg
+import winim, strformat, strutils, macros
+
 
 # {.push stackTrace:off.}
 # template debugBreak() =
@@ -29,7 +29,6 @@
 #     #endif
 #   """.}
 # {.pop.}
-
 
 # #ifdef __clang__
 # /*code specific to clang compiler*/
@@ -47,17 +46,10 @@
 template getOffset(aa, bb: untyped): int =
   cast[int](bb) - cast[int](aa)
 
-
-
-# template getOffset(aa, bb: untyped): int =
-#   cast[int](bb) - cast[int](aa)
-
-
 template windbg(body: untyped) =
   when not defined release:
+    echo body
     OutputDebugString(body)
-
-import winim, strformat, strutils
 
 proc `&`[I, J: static int; Type](a: array[I, Type], b: array[J, Type]): array[I + J, Type] =
   ## concatenate for arrays
@@ -88,6 +80,7 @@ type
     orginalFunc*: pointer ## pointer to the original function
     orgData*: JmpArr ## the original data contained at the 5 byte
     farJumpHelper*: pointer ## pointer to the far jump helper, that later jumps to the
+    farJumpHelperSize*: uint64 ## how much memory we actually have allocated for the FJH
     hookData*: JmpArr ## the bytes we have written at the start of the proc
 
 proc `$`(hook: Hook): string =
@@ -113,16 +106,17 @@ template withWriteableMem(pfunc: pointer, size: int, body: untyped) =
   )
   FlushInstructionCache(GetCurrentProcess(), pfunc, size)
 
-
 proc unsetHook*(hook: Hook) =
   ## Destroys the hook and all its artifacts.
   withWriteableMem(hook.orginalFunc, sizeof(JmpArr)):
+    windbg "Restore original"
     copyMem(hook.orginalFunc, unsafeAddr hook.orgData, sizeof(hook.orgData))
   if not hook.farJumpHelper.isNil:
-    dealloc(hook.farJumpHelper)
+    windbg "Dealloc farJumpHelper"
+    VirtualFree(hook.farJumpHelper, hook.farJumpHelperSize.SIZE_T, MEM_RELEASE)
 
 
-proc allocatePageNearAddress(targetAddr: pointer): pointer =
+proc allocatePageNearAddress(targetAddr: pointer): tuple[p: pointer, size: uint64] =
   ## http://kylehalladay.com/blog/2020/11/13/Hooking-By-Example.html
   windbg("allocatePageNearAddress starts")
   var sysInfo: SYSTEM_INFO
@@ -148,22 +142,22 @@ proc allocatePageNearAddress(targetAddr: pointer): pointer =
                                       MEM_COMMIT or MEM_RESERVE,
                                       PAGE_EXECUTE_READWRITE)
       if outAddr != nil:
-        return outAddr
+        return (outAddr, PAGE_SIZE)
 
     if lowAddr > minAddr:
       var outAddr: pointer = VirtualAlloc(cast[LPVOID](lowAddr), PAGE_SIZE.SIZE_T,
                                       MEM_COMMIT or MEM_RESERVE,
                                       PAGE_EXECUTE_READWRITE)
       if outAddr != nil:
-        return outAddr
+        return (outAddr, PAGE_SIZE)
 
     inc(pageOffset)
     if needsExit:
       break
-  return cast[pointer](0)
+  return (cast[pointer](0), 0.uint64)
 
 
-proc setHook*(orginalFunc, detourFunc: pointer): Hook {.exportc, stdcall, dynlib.} =
+proc setHook*(orginalFunc, detourFunc: pointer): Hook =
   ## sets a hook; any calls to `originalFunc` is detoured to the `detourFunc`.
   ##
   ##
@@ -194,30 +188,27 @@ proc setHook*(orginalFunc, detourFunc: pointer): Hook {.exportc, stdcall, dynlib
   ##    echo hook.testHook()
   ##    hook.enableHook( not hook.testHook() )
   ##    discard readline(stdin)
-
-
   withWriteableMem(orginalFunc, sizeof(JmpArr)):
     ## Instead of jumping directly to the detourFunc, we jump to the farJumpHelper
     ## which in turn will do a far jump to the detourFunc
-    var farJumpHelper = allocatePageNearAddress(orginalFunc) # TODO we only need a far jump helper when the offset is larger than near jump
-    if farJumpHelper.isNil:
-      windbg("farJumpHelper is nil")
-      return
-    windbg("got farJumpHelper helper" & $(repr farJumpHelper) )
-    # var offsetOriginalFuncToFarJumpHelper: uint32 = getOffset(orginalFunc, farJumpHelper) - sizeof(JmpArr).uint32
-    var offsetOriginalFuncToFarJumpHelper: int32 = getOffset(orginalFunc, farJumpHelper).int32 - sizeof(JmpArr).int32
-    windbg("offsetOriginalFuncToFarJumpHelper:" & $offsetOriginalFuncToFarJumpHelper)
-    var jmpInstruction: JmpArr = [0xE9.byte] & offsetOriginalFuncToFarJumpHelper
-    # print jmpInstruction
-    var trampolineData: FarJmpArr = [0x49.byte, 0xBA] & detourFunc & [0x41.byte, 0xff, 0xe2]
-    copyMem(farJumpHelper, unsafeAddr trampolineData, sizeof(trampolineData)) # install trampoline
-    # echo "farJumpHelper: ", cast[int](farJumpHelper).toHex()
     result = Hook()
     result.orginalFunc = orginalFunc
-    result.farJumpHelper = farJumpHelper
-    copyMem(addr result.orgData, orginalFunc, sizeof(jmpInstruction))
-    copyMem(orginalFunc, addr jmpInstruction, sizeof(jmpInstruction))
-    result.hookData = jmpInstruction
+    (result.farJumpHelper, result.farJumpHelperSize) = allocatePageNearAddress(orginalFunc) # TODO we only need a far jump helper when the offset is larger than near jump
+    if result.farJumpHelper.isNil:
+      windbg("farJumpHelper is nil")
+      return
+    windbg("got farJumpHelper helper" & $(repr result.farJumpHelper) )
+    # var offsetOriginalFuncToFarJumpHelper: uint32 = getOffset(orginalFunc, farJumpHelper) - sizeof(JmpArr).uint32
+    var offsetOriginalFuncToFarJumpHelper: int32 = getOffset(orginalFunc, result.farJumpHelper).int32 - sizeof(JmpArr).int32
+    windbg("offsetOriginalFuncToFarJumpHelper:" & $offsetOriginalFuncToFarJumpHelper)
+    result.hookData = [0xE9.byte] & offsetOriginalFuncToFarJumpHelper
+    # print jmpInstruction
+    var trampolineData: FarJmpArr = [0x49.byte, 0xBA] & detourFunc & [0x41.byte, 0xff, 0xe2]
+    copyMem(result.farJumpHelper, unsafeAddr trampolineData, sizeof(trampolineData)) # install trampoline
+    # echo "farJumpHelper: ", cast[int](farJumpHelper).toHex()
+
+    copyMem(addr result.orgData, orginalFunc, sizeof(result.hookData)) # save for later
+    copyMem(orginalFunc, addr result.hookData, sizeof(result.hookData)) # install the hook
 
 proc testHook*(hook: Hook): bool =
   ## tests if the hook is still in place
@@ -241,13 +232,6 @@ proc enableHook*(hook: Hook, enable = true) =
     withWriteableMem(hook.orginalFunc, sizeOf(hook.orgData)):
       copyMem(hook.orginalFunc, unsafeAddr hook.orgData, sizeOf(hook.orgData))
 
-# proc disableHook*(hook: Hook) =
-#   ## disables the hook, by restoring the original data on the org function
-#   ## for cleaning up all hooking artifacts use `unsetHook`
-#   if not testHook(hook): return # hool ist already disabled
-#   withWriteableMem(hook.orginalFunc, sizeOf(hook.orgData)):
-#     copyMem(hook.orginalFunc, unsafeAddr hook.orgData, sizeOf(hook.orgData))
-
 proc createTrampolin*(hook: Hook): pointer =
   ## creates a "trampoline" that calls the original function code
   ## This executes the original function bytes, then jumps to the hooked function
@@ -268,22 +252,15 @@ proc createTrampolin*(hook: Hook): pointer =
   copyMem(result, unsafeAddr data, sizeof(data)) # move trampoline
   return result
 
-import macros
 macro nimhook(funcToHook, body: untyped): untyped =
-  # echo repr funcToHook
-  # echo repr body[0]
-  # echo treeRepr funcToHook
   let newFuncName = body[0]
   let procty = newTree(nnkProcTy, body.params, body.pragma)
-  # echo repr procty
   var nbody = body
-  # echo treeRepr nbody[6][0]
   let hookName = newIdentNode("nimhook" & $funcToHook)
   let trampolineName = newIdentNode("nimhookTrampoline" & $funcToHook)
   nbody[6].insert 0, quote do:
-    # echo "hallo"
     let `funcToHook` = cast[`procty`](`trampolineName`)
-  echo repr nbody
+  # echo repr nbody
   result = newStmtList()
   result.add quote do:
     var `hookName`: Hook
@@ -349,6 +326,30 @@ when false:
     hook.enableHook( not hook.testHook() )
     discard readline(stdin)
 
+when false:
+  import print
+
+  proc functionA(aa: bool, ii: int): float {.stdcall.} =
+    echo "AAAAAAAAAAAAAAA"
+    echo "AAAAAAAAAAAAAAA"
+    echo "==============="
+    return 80.80
+
+  proc functionB(aa: bool, ii: int): float {.stdcall, nimhook: functionA.} =
+    echo "BBBBBBBBBBBBBBB"
+    echo "BBBBBBBBBBBBBBB"
+    echo "==============="
+    echo "was: ", functionA(aa, ii) # if inside the detour, functionA calls the trampoline!
+    return 13.37
+
+  for _ in 0 ..< 5:
+    echo functionA(true, 1234)
+    ## CURRENTLY the minhook macro implicitly creates variables for the hook and trampoline:
+    print nimhookFunctionA.testHook()
+    nimhookFunctionA.enableHook( not nimhookFunctionA.testHook() )
+    discard readline(stdin)
+  nimhookFunctionA.unsetHook()
+
 
 when false:
   import os
@@ -396,7 +397,7 @@ when false:
   trampFoo = createTrampolin(hookInfo)
   echo "hook set"
 
-when true:
+when false:
   import winim, strformat
   # destroy task manager
   OutputDebugString("starting!!")
@@ -471,6 +472,23 @@ when false:
   OutputDebugString("loaded")
 
 
-  # proc MyLoadLibrary2(self: ptr ICLRRuntimeInfo; pwzDllName: LPCWSTR;
-  #                 phndModule: ptr HMODULE): HRESULT {.stdcall.} =
-  #   return 0.HMODULE
+# when false:
+#   # import winim
+#   proc printf(formatstr: cstring) {.importc: "printf", varargs.}
+
+#   var outputStr = ""
+
+#   proc myPrintf(formatstr: cstring) {.cdecl.} =
+#     echo "hooked: ", formatstr
+#     va_list argp;
+#     va_start(argp, format);
+#     # for arg in args:
+#       # echo " -> ", repr arg
+#     outputStr.add $formatstr & "\n"
+
+
+#   var hook = setHook(printf, myPrintf)
+#   printf("foo %i baa", 123)
+#   printf("foo %i baa", 123)
+#   echo outputStr
+#   # unsetHook(hook)
