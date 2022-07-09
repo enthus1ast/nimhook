@@ -15,34 +15,6 @@
 import winim, strformat, strutils, macros
 
 
-# {.push stackTrace:off.}
-# template debugBreak() =
-#   {.emit: """
-#     #ifdef _MSC_VER
-#       __debugbreak();
-#     #elif __GNUC__
-#       __builtin_trap();
-#     #elif __MINGW32__
-#       __builtin_trap();
-#     #else
-#       //1 / 0;
-#     #endif
-#   """.}
-# {.pop.}
-
-# #ifdef __clang__
-# /*code specific to clang compiler*/
-# #elif __GNUC__
-# /*code for GNU C compiler */
-# #elif _MSC_VER
-# /*usually has the version number in _MSC_VER*/
-# /*code specific to MSVC compiler*/
-# #elif __BORLANDC__
-# /*code specific to borland compilers*/
-# #elif __MINGW32__
-# /*code specific to mingw compilers*/
-# #endif
-
 template getOffset(aa, bb: untyped): int =
   cast[int](bb) - cast[int](aa)
 
@@ -168,12 +140,12 @@ proc setHook*(orginalFunc, detourFunc: pointer): Hook =
   ##  type
   ##    FunctionA = proc (aa: bool, ii: int): float {.stdcall.}
   ##
-  ##  proc functionA(aa: bool, ii: int): float {.exportc, stdcall, dynlib.} =
+  ##  proc functionA(aa: bool, ii: int): float {.stdcall.} =
   ##    echo "AAAAAAAAAAAAAAA"
   ##    echo "==============="
   ##    return 80.80
   ##
-  ##  proc functionB(aa: bool, ii: int): float {.exportc, stdcall, dynlib.} =
+  ##  proc functionB(aa: bool, ii: int): float {.stdcall.} =
   ##    echo "BBBBBBBBBBBBBBB"
   ##    echo "==============="
   ##    if not trampFunctionA.isNil:
@@ -471,24 +443,3 @@ when false:
 
   OutputDebugString("loaded")
 
-
-# when false:
-#   # import winim
-#   proc printf(formatstr: cstring) {.importc: "printf", varargs.}
-
-#   var outputStr = ""
-
-#   proc myPrintf(formatstr: cstring) {.cdecl.} =
-#     echo "hooked: ", formatstr
-#     va_list argp;
-#     va_start(argp, format);
-#     # for arg in args:
-#       # echo " -> ", repr arg
-#     outputStr.add $formatstr & "\n"
-
-
-#   var hook = setHook(printf, myPrintf)
-#   printf("foo %i baa", 123)
-#   printf("foo %i baa", 123)
-#   echo outputStr
-#   # unsetHook(hook)
