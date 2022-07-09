@@ -59,7 +59,7 @@ proc functionB(aa: bool, ii: int): float {.stdcall, nimhook: functionA.} =
 
 for _ in 0 ..< 5:
   echo functionA(true, 1234)
-  ## CURRENTLY the ninhook macro implicitly
+  ## CURRENTLY the nimhook macro implicitly
   ## creates variables for the hook and trampoline:
   echo nimhookFunctionA.testHook()
   nimhookFunctionA.enableHook( not nimhookFunctionA.testHook() )
