@@ -316,7 +316,7 @@ when false:
 
   for _ in 0 ..< 5:
     echo functionA(true, 1234)
-    ## CURRENTLY the minhook macro implicitly creates variables for the hook and trampoline:
+    ## CURRENTLY the nimhook macro implicitly creates variables for the hook and trampoline:
     print nimhookFunctionA.testHook()
     nimhookFunctionA.enableHook( not nimhookFunctionA.testHook() )
     discard readline(stdin)
