@@ -11,13 +11,13 @@ var trampFunctionA: pointer # <- a pointer to a stub that calls the original fun
 type
   FunctionA = proc (aa: bool, ii: int): float {.stdcall.}
 
-proc functionA(aa: bool, ii: int): float {.exportc, stdcall, dynlib.} =
+proc functionA(aa: bool, ii: int): float {.stdcall.} =
   echo "AAAAAAAAAAAAAAA"
   echo "AAAAAAAAAAAAAAA"
   echo "==============="
   return 80.80
 
-proc functionB(aa: bool, ii: int): float {.exportc, stdcall, dynlib.} =
+proc functionB(aa: bool, ii: int): float {.stdcall.} =
   echo "BBBBBBBBBBBBBBB"
   echo "BBBBBBBBBBBBBBB"
   echo "==============="
